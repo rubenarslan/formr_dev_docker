@@ -1,13 +1,7 @@
 .env
-!.gitkeep
+# formr.org source is cloned here host-side by setup.sh (not tracked)
 formr_app/formr
+# local DB data + the schema seed copied from the clone
 mysql/data/*
 mysql/dbinitial/*
-mysql/encryption/*
-proxy/certs/*
-proxy/conf.d/*
-proxy/htpasswd/*
-proxy/vhost/*
-data/logs/access.log
-data/logs/traefik.log
-proxy/acme/acme.json
+!.gitkeep

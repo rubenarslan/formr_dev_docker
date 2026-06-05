@@ -1,45 +1,54 @@
 #!/bin/bash
+# formr dev entrypoint. The formr source is bind-mounted at /formr (cloned
+# host-side by setup.sh). On first start we install PHP + JS deps and build the
+# frontend bundles (formr v1.0.0+ no longer ships them), set up cron, then run
+# apache. Steps are idempotent (guarded by markers) so restarts are fast.
+#
+# We deliberately do NOT exit on step failure — apache still comes up so the
+# container stays inspectable; check the logs if composer/npm reported errors.
 
-# echo get current version
-VERSION_FILE="/formr/formr.${FORMR_TAG//\//_}.version" # replace slashes (as in feature branches with _)
-
-if [ ! -f "${VERSION_FILE}" ]
-then
-    git clone -b ${FORMR_TAG} https://github.com/rubenarslan/formr.org.git /formr
-    echo "Cloned formr branch ${FORMR_TAG} into /formr"
-
-    if [ ! -d "/formr/config" ]
-    then
-        cp -r /formr/config-dist /formr/config
-    fi
-    echo "Created configuration"
-
-    chown -R www-data:www-data /formr/tmp
-
-    composer install
-
-    echo "Formr Version: ${FORMR_TAG}" > ${VERSION_FILE}
+if [ ! -f /formr/composer.json ]; then
+    echo "E: /formr has no formr source. Clone formr.org into ./formr_app/formr" >&2
+    echo "E: (run ./setup.sh), then start again." >&2
 fi
 
-# ln -sf /proc/self/fd/1 /formr/tmp/logs/errors.log
+cd /formr 2>/dev/null || true
+
+# Seed config/ from config-dist/ on first run (build.sh then fills settings.php).
+if [ -d /formr/config-dist ] && [ ! -d /formr/config ]; then
+    cp -r /formr/config-dist /formr/config
+    echo "> Seeded config/ from config-dist/"
+fi
+
+# PHP dependencies
+if [ -f /formr/composer.json ] && [ ! -f /formr/vendor/autoload.php ]; then
+    echo "> Installing PHP dependencies (composer)..."
+    composer install --no-interaction
+fi
+
+# Frontend bundles. webpack:build runs FIRST because webpack.config.js sets
+# output.clean=true (wipes the build dir); the legacy `npm run build` (css/js/
+# fonts) lands on top. admin.bundle.js is a webpack output, so its presence is
+# the "already built" marker.
+if [ -f /formr/package.json ] && [ ! -f /formr/webroot/assets/build/admin.bundle.js ]; then
+    echo "> Building frontend assets (npm ci + webpack + build)..."
+    npm ci --no-audit --no-fund \
+        && npm run webpack:build \
+        && npm run build
+fi
+
+mkdir -p /formr/tmp
+chown -R www-data:www-data /formr/tmp 2>/dev/null || true
+
+# Cron: formr_crontab lives in the cloned repo, so register it here (NOT at
+# image build time, where it doesn't exist yet — that was the build failure).
+if [ -f /formr/config/formr_crontab ]; then
+    crontab /formr/config/formr_crontab && echo "> Registered formr crontab"
+fi
+
+# Apache logs -> container stdout/stderr
 ln -sf /proc/self/fd/1 /var/log/apache2/access.log
-ln -sf /proc/self/fd/1 /var/log/apache2/error.log
+ln -sf /proc/self/fd/2 /var/log/apache2/error.log
 
-# if [ ! -f "/etc/formr/apache.conf" ]
-# then
-#     cp -r /config-examples/. /etc/formr/
-# fi
-
-# if [ ! -f "/etc/apache2/sites-available/formr.conf" ]
-# then
-#     ln -s /etc/formr/${FORMR_APACHE_CONFIG} /etc/apache2/sites-available/formr.conf
-# fi
-
-# a2dissite 000-default
-# a2ensite formr
-# a2enmod rewrite headers ssl xsendfile proxy proxy_http proxy_balancer lbmethod_byrequests
-
-/usr/sbin/apache2ctl stop
-
-/usr/sbin/apache2ctl -D FOREGROUND
-
+service cron start
+exec apache2-foreground

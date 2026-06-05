@@ -1,52 +1,57 @@
 # formr dockerized development environment
 
-This is just an attempt to make it easier to start developing formr. This setup is not suitable for production. It permits arbitrary code execution on OpenCPU, the database is not encrypted, the HTTP connection is not encrypted, etc.
+A minimal local environment for **developing and trying [formr.org](https://github.com/rubenarslan/formr.org)**.
+It runs the app, MariaDB, OpenCPU and the two queue daemons — nothing else (no
+TLS, no WAF, no monitoring, no backups). **Not for production:** OpenCPU permits
+arbitrary R code execution, the DB and HTTP are unencrypted.
 
-### 0. Requirements
-- [Docker & Docker compose](https://docs.docker.com/compose/install) (docker compose minimum version is 2)
+The formr source is **bind-mounted** from `./formr_app/formr`, so you edit it on
+your host (with your IDE + Xdebug) and changes are live in the container.
 
-## Short version
-- Clone this repository
-- Run `./setup.sh` (careful, this is destructive)
-- Configure values in `.env` (not needed for a quick try)
-- Run `./build.sh`
-- Configure `formr_app/formr/config/settings.php`, especially the email account used for email verification. Run `docker compose restart` after file changed.
+## Requirements
+- [Docker + Docker Compose v2](https://docs.docker.com/compose/install/)
 
-## Long Version
+## Quick start
+```bash
+./setup.sh     # creates .env, clones formr.org into ./formr_app/formr, seeds the DB schema (destructive)
+# (optionally edit .env — e.g. FORMR_TAG, passwords)
+./build.sh     # builds images, starts the stack, configures settings.php, creates the superadmin
+```
+Then open **http://localhost** (admin login at `http://localhost/admin/account/login`,
+using `FORMR_EMAIL` / `FORMR_PASSWORD` from `.env`). OpenCPU is at `http://localhost:8080/ocpu/`.
 
-### 1. Copy and prepare files
-- Run `./setup.sh`
+The first `build.sh` takes a few minutes: the container's entrypoint runs
+`composer install` and builds the frontend bundles with `npm` (formr v1.0.0+ no
+longer commits them).
 
-### 2. Configure Database and Domain names
-- Open `.env` and fill in the correct configuration items
-- `.env` config item :
-````
-MARIADB_ROOT_PASSWORD -> Mysql password of root, by default "generate-password"
-MARIADB_DATABASE			-> Mysql database name, default = formr_db
-MARIADB_USER				  -> Mysql database user, default = formr_user
-MARIADB_PASSWORD 			-> Mysql database password of user MARIADB_USER, by default "generate-password"
+## Using the prebuilt public images (skip the local image build)
+The three environment images are published to GHCR. To pull instead of build:
+```bash
+echo "FORMR_REGISTRY=ghcr.io/rubenarslan" >> .env   # already the default
+docker compose pull        # formr-dev-app / -daemon / -opencpu
+./build.sh                 # `docker compose build` becomes a fast no-op
+```
 
-MAIN_DOMAIN           -> The main domain of your formr instance.
-FORMR_DOMAIN			    -> Domain of formr_app. Can fill with multiple domain with separated by comma (,). Default value = localhost
-OPENCPU_DOMAIN			  -> (Sub)domain for opencpu. Default value = localhost:8080
+## What's inside
+| service | image | role |
+| --- | --- | --- |
+| `formr_app` | `formr-dev-app` (PHP 8.2 + Apache + Xdebug + Node) | the app; bind-mounts `./formr_app/formr` |
+| `formr_db` | `mariadb:noble` | database; loads `sql/schema.sql` on first init |
+| `opencpu` | `formr-dev-opencpu` | R runtime with the formr R package |
+| `formrmailqueue` / `formrsessionqueue` | `formr-dev-daemon` (PHP 8.2 CLI) | email + run/session workers |
 
-FORMR_EMAIL			      -> Email for the first superadmin
-FORMR_PASSWORD        -> Default superadmin password, by default "generate-password"
+## Common tasks
+```bash
+docker compose logs -f formr_app          # watch logs
+docker compose exec formr_app bash        # shell into the app
+docker compose exec formr_app composer install   # after pulling new formr code
+docker compose exec formr_app npm run webpack:build && docker compose exec formr_app npm run build  # rebuild assets
+./reset_2fa_for_user.sh                    # clear a user's 2FA
+```
 
-FORMR_TAG			        -> formr version or branch. Please check on this link https://github.com/rubenarslan/formr.org/tags. Default value = feature/dockerprep
+**Xdebug** runs in trigger mode (step-debug to `host.docker.internal:9003`, idekey
+`VSCODE`). It only activates when an `XDEBUG_TRIGGER` cookie/GET param is present,
+so normal requests aren't slowed.
 
-TIMEZONE              -> defaults to Europe/Berlin
-
-````
-
-### 3. Build containers and Install initial schema
-- Run `./build.sh`
-- This process will be create a mysql database, pull formr project from github, create and run the containers for OpenCPU, formr and its daemons:
-  - formr_app  = container of formr application
-  - formr_db   = container of mysql db
-  - opencpu    = container of opencpu
-  - formrsessionqueue = daemon that takes care of participants moving along in the run
-  - formrmailqueue = daemon that takes care of email sending
-
-### 4. File configuration
-Open `formr_app/formr/config/settings.php`. Configure as needed, especially the email account used for email verification.
+To switch the formr version: edit `FORMR_TAG` in `.env`, re-clone
+`./formr_app/formr`, and re-run `./setup.sh && ./build.sh`.

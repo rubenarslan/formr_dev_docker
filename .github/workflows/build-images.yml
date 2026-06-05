@@ -1,0 +1,58 @@
+name: Build & push dev images
+
+# Builds the three formr dev ENVIRONMENT images (no formr code baked) and pushes
+# them to GHCR so a plain `docker compose up` pulls instead of building locally.
+#
+# These are meant to be PUBLIC. GHCR creates new packages private; after the
+# first successful run, set each package's visibility to Public once:
+#   github.com/users/<owner>/packages/container/<name>/settings -> Change visibility
+#   (formr-dev-app, formr-dev-daemon, formr-dev-opencpu)
+
+on:
+  push:
+    branches: [main]
+    paths: ['formr_app/Dockerfile', 'php_daemon/Dockerfile', 'opencpu/**', '.github/workflows/build-images.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: app
+            context: formr_app
+            dockerfile: formr_app/Dockerfile
+          - name: daemon
+            context: php_daemon
+            dockerfile: php_daemon/Dockerfile
+          - name: opencpu
+            context: opencpu
+            dockerfile: opencpu/Dockerfile
+    steps:
+      - uses: actions/checkout@v6
+      - id: vars
+        run: echo "owner=${GITHUB_REPOSITORY_OWNER,,}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v4
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push formr-dev-${{ matrix.name }}
+        uses: docker/build-push-action@v7
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.dockerfile }}
+          push: true
+          tags: |
+            ghcr.io/${{ steps.vars.outputs.owner }}/formr-dev-${{ matrix.name }}:latest
+          cache-from: type=registry,ref=ghcr.io/${{ steps.vars.outputs.owner }}/formr-dev-${{ matrix.name }}:buildcache
+          cache-to: type=registry,ref=ghcr.io/${{ steps.vars.outputs.owner }}/formr-dev-${{ matrix.name }}:buildcache,mode=max

@@ -3,117 +3,125 @@ x-logging: &default-logging
     max-size: "100m"
     max-file: "5"
   driver: json-file
+
+# Shared DB env consumed by the apache vhost (PassEnv) and the daemons.
+x-db-env: &db-env
+  TZ: ${TIMEZONE}
+  MARIADB_USER: ${MARIADB_USER}
+  MARIADB_PASSWORD: ${MARIADB_PASSWORD}
+  MARIADB_DATABASE: ${MARIADB_DATABASE}
+
 services:
 
-  # formr.org application (Configure in etc/formr/apache.conf and formr_app/formr/config/settings.php)
-
+  # formr.org application. Code is bind-mounted from ./formr_app/formr (cloned
+  # host-side by setup.sh); the image is just the PHP/Apache/Xdebug/Node env.
   formr_app:
+    image: ${FORMR_REGISTRY:-ghcr.io/rubenarslan}/formr-dev-app:${FORMR_DEV_TAG:-latest}
     build:
       context: formr_app
       dockerfile: Dockerfile
     container_name: formr_app
     hostname: formr_app
     environment:
-      - TZ=${TIMEZONE}
-      - FORMR_TAG=${FORMR_TAG} #required
-      - FORMR_APACHE_CONFIG=${FORMR_APACHE_CONFIG}
-      - XDEBUG_MODE=debug,develop
-      - XDEBUG_CONFIG="client_host=host.docker.internal client_port=9003 idekey=VSCODE"
-      - PHP_IDE_CONFIG="serverName=Docker"
-#    links:
-#      - formr_db
+      <<: *db-env
+      FORMR_TAG: ${FORMR_TAG}
+      # Mode is the single source of truth for xdebug; client/idekey live in
+      # xdebug.ini. NEVER add XDEBUG_CONFIG here (forces step-debug every request).
+      XDEBUG_MODE: "develop,debug"
+      PHP_IDE_CONFIG: "serverName=Docker"
     volumes:
       - ./formr_app/formr:/formr
-      - ./formr_app/apache/sites-enabled:/etc/apache2/sites-enabled/ #apache vhost conf
-      - ./formr_app/formr.php.ini:/usr/local/etc/php/conf.d/custom.php.ini # php.ini
-    restart: unless-stopped
-    depends_on:
-      - formr_db
-      - opencpu
+      - ./formr_app/apache/sites-enabled:/etc/apache2/sites-enabled/
+      - ./formr_app/formr.php.ini:/usr/local/etc/php/conf.d/custom.php.ini
+      - ./formr_app/xdebug.ini:/usr/local/etc/php/conf.d/zz-xdebug-formr.ini:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     ports:
       - "80:80"
-    networks:
-      - all
+    restart: unless-stopped
+    depends_on:
+      formr_db:
+        condition: service_healthy
+      opencpu:
+        condition: service_started
+    networks: [all]
     logging: *default-logging
 
-
-  # mysql database (Configure in formr_app/formr/config/settings.php)
-
   formr_db:
-    image: mariadb:latest
+    image: mariadb:noble
     container_name: formr_db
     hostname: formr_db
-    env_file:
-      - '.env'
-    expose:
-      - "3306"
+    env_file: ['.env']
+    expose: ["3306"]
     volumes:
       - ./mysql/data:/var/lib/mysql
       - ./mysql/dbinitial:/docker-entrypoint-initdb.d
-
-    # (this is just an example, not intended to be a production configuration)
     command: >
-      bash -c "
-      /usr/local/bin/docker-entrypoint.sh  --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci"
+      /usr/local/bin/docker-entrypoint.sh
+      --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     restart: always
-    networks:
-      - all
+    networks: [all]
     logging: *default-logging
-  
+
   formrmailqueue:
+    image: ${FORMR_REGISTRY:-ghcr.io/rubenarslan}/formr-dev-daemon:${FORMR_DEV_TAG:-latest}
     build:
       context: php_daemon
       dockerfile: Dockerfile
     container_name: formrmailqueue
-    environment:
-      - TZ=${TIMEZONE}
+    environment: { <<: *db-env }
     volumes:
       - ./formr_app/formr:/formr
     working_dir: /formr
     command: php bin/queue.php -t Email
     restart: always
     depends_on:
-      - formr_app
-    networks:
-      - all
+      formr_app:
+        condition: service_started
+      formr_db:
+        condition: service_healthy
+    networks: [all]
 
   formrsessionqueue:
+    image: ${FORMR_REGISTRY:-ghcr.io/rubenarslan}/formr-dev-daemon:${FORMR_DEV_TAG:-latest}
     build:
       context: php_daemon
       dockerfile: Dockerfile
     container_name: formrsessionqueue
-    environment:
-      - TZ=${TIMEZONE}
+    environment: { <<: *db-env }
     volumes:
       - ./formr_app/formr:/formr
     working_dir: /formr
     command: php bin/queue.php -t UnitSession
     restart: always
     depends_on:
-      - formr_app
-    networks:
-      - all
+      formr_app:
+        condition: service_started
+      formr_db:
+        condition: service_healthy
+    networks: [all]
 
   opencpu:
+    image: ${FORMR_REGISTRY:-ghcr.io/rubenarslan}/formr-dev-opencpu:${FORMR_DEV_TAG:-latest}
     build:
       context: opencpu
       dockerfile: Dockerfile
     container_name: opencpu
     hostname: opencpu
-    volumes:
-#      - ./opencpu/opencpu_library:/usr/local/lib/R/site-library
-      - ./opencpu/conf/server.conf:/etc/opencpu/server.conf
-      - ./opencpu/conf/server.conf.d:/etc/opencpu/server.conf.d
     environment:
       - TZ=${TIMEZONE}
     ports:
       - "8080:80"
-    networks:
-      - all
     restart: always
+    networks: [all]
     logging: *default-logging
 
 networks:
   all:
     driver: bridge
-    name: all
+    name: formr_dev
