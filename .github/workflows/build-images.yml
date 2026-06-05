@@ -11,7 +11,7 @@ name: Build & push dev images
 on:
   push:
     branches: [main]
-    paths: ['formr_app/Dockerfile', 'php_daemon/Dockerfile', 'opencpu/**', '.github/workflows/build-images.yml']
+    paths: ['formr_app/Dockerfile', 'formr_app/docker-entrypoint.sh', 'php_daemon/Dockerfile', 'opencpu/**', '.github/workflows/build-images.yml']
   workflow_dispatch:
 
 permissions:

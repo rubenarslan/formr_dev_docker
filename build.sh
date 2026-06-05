@@ -19,7 +19,7 @@ docker compose up -d formr_db opencpu formr_app
 echo "> Waiting for formr_app first-run setup (composer + npm asset build — minutes on first run)..."
 until docker compose exec -T formr_app test -f /formr/vendor/autoload.php 2>/dev/null; do sleep 3; done
 echo "  composer install done"
-until docker compose exec -T formr_app test -f /formr/webroot/assets/build/admin.bundle.js 2>/dev/null; do sleep 5; done
+until docker compose exec -T formr_app test -f /formr/webroot/assets/build/js/admin.bundle.js 2>/dev/null; do sleep 5; done
 echo "  frontend assets built"
 
 cfg="formr_app/formr/config/settings.php"

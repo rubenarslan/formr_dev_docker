@@ -14,6 +14,13 @@ fi
 
 cd /formr 2>/dev/null || true
 
+# composer/npm run as root here; hand the generated dirs back to the host owner
+# of the /formr bind-mount so they stay editable/removable on the host without
+# sudo (www-data still reads them via 0644). Called only right after an install.
+HOST_UID=$(stat -c %u /formr 2>/dev/null || echo 0)
+HOST_GID=$(stat -c %g /formr 2>/dev/null || echo 0)
+chown_to_host() { [ "$HOST_UID" != "0" ] && chown -R "$HOST_UID:$HOST_GID" "$@" 2>/dev/null || true; }
+
 # Seed config/ from config-dist/ on first run (build.sh then fills settings.php).
 if [ -d /formr/config-dist ] && [ ! -d /formr/config ]; then
     cp -r /formr/config-dist /formr/config
@@ -24,17 +31,19 @@ fi
 if [ -f /formr/composer.json ] && [ ! -f /formr/vendor/autoload.php ]; then
     echo "> Installing PHP dependencies (composer)..."
     composer install --no-interaction
+    chown_to_host /formr/vendor
 fi
 
 # Frontend bundles. webpack:build runs FIRST because webpack.config.js sets
 # output.clean=true (wipes the build dir); the legacy `npm run build` (css/js/
-# fonts) lands on top. admin.bundle.js is a webpack output, so its presence is
-# the "already built" marker.
-if [ -f /formr/package.json ] && [ ! -f /formr/webroot/assets/build/admin.bundle.js ]; then
+# fonts) lands on top. webpack writes admin.bundle.js into build/js/, so its
+# presence is the "already built" marker.
+if [ -f /formr/package.json ] && [ ! -f /formr/webroot/assets/build/js/admin.bundle.js ]; then
     echo "> Building frontend assets (npm ci + webpack + build)..."
     npm ci --no-audit --no-fund \
         && npm run webpack:build \
         && npm run build
+    chown_to_host /formr/node_modules /formr/webroot/assets/build
 fi
 
 mkdir -p /formr/tmp
