@@ -22,22 +22,26 @@ echo "  composer install done"
 until docker compose exec -T formr_app test -f /formr/webroot/assets/build/js/admin.bundle.js 2>/dev/null; do sleep 5; done
 echo "  frontend assets built"
 
+# sed -i is not portable: GNU sed takes -i without an argument, BSD/macOS sed
+# requires a suffix ('' for none).
+if sed --version >/dev/null 2>&1; then sedi() { sed -i "$@"; }; else sedi() { sed -i '' "$@"; }; fi
+
 cfg="formr_app/formr/config/settings.php"
 if grep -q "'host' => 'localhost'," "$cfg" 2>/dev/null; then
     echo "> Configuring $cfg for local dev..."
     # DB sub-array (creds read from the container env passed in docker-compose.yml)
-    sed -i "s#'host' => 'localhost',#'host' => 'formr_db',#"                 "$cfg"
-    sed -i "s#'login' => 'user',#'login' => getenv('MARIADB_USER'),#"        "$cfg"
-    sed -i "s#'password' => 'password',#'password' => getenv('MARIADB_PASSWORD'),#" "$cfg"
-    sed -i "s#'database' => 'database',#'database' => getenv('MARIADB_DATABASE'),#" "$cfg"
+    sedi "s#'host' => 'localhost',#'host' => 'formr_db',#"                 "$cfg"
+    sedi "s#'login' => 'user',#'login' => getenv('MARIADB_USER'),#"        "$cfg"
+    sedi "s#'password' => 'password',#'password' => getenv('MARIADB_PASSWORD'),#" "$cfg"
+    sedi "s#'database' => 'database',#'database' => getenv('MARIADB_DATABASE'),#" "$cfg"
     # OpenCPU URL (two occurrences -> global)
-    sed -i "s#'public_url' => 'https://public.opencpu.org'#'public_url' => 'http://${OPENCPU_DOMAIN}'#g" "$cfg"
+    sedi "s#'public_url' => 'https://public.opencpu.org'#'public_url' => 'http://${OPENCPU_DOMAIN}'#g" "$cfg"
     # Top-level $settings[...] lines (\$ so bash doesn't expand it)
-    sed -i "s#^\$settings\['protocol'\].*#\$settings['protocol'] = 'http://';#"                     "$cfg"
-    sed -i "s#^\$settings\['use_study_subdomains'\].*#\$settings['use_study_subdomains'] = false;#" "$cfg"
-    sed -i "s#^\$settings\['admin_domain'\].*#\$settings['admin_domain'] = '${FORMR_DOMAIN}';#"     "$cfg"
-    sed -i "s#^\$settings\['study_domain'\].*#\$settings['study_domain'] = '${FORMR_DOMAIN}';#"      "$cfg"
-    sed -i "s#^\$settings\['api_domain'\].*#\$settings['api_domain'] = '${FORMR_DOMAIN}';#"          "$cfg"
+    sedi "s#^\$settings\['protocol'\].*#\$settings['protocol'] = 'http://';#"                     "$cfg"
+    sedi "s#^\$settings\['use_study_subdomains'\].*#\$settings['use_study_subdomains'] = false;#" "$cfg"
+    sedi "s#^\$settings\['admin_domain'\].*#\$settings['admin_domain'] = '${FORMR_DOMAIN}';#"     "$cfg"
+    sedi "s#^\$settings\['study_domain'\].*#\$settings['study_domain'] = '${FORMR_DOMAIN}';#"      "$cfg"
+    sedi "s#^\$settings\['api_domain'\].*#\$settings['api_domain'] = '${FORMR_DOMAIN}';#"          "$cfg"
     docker compose restart formr_app
 else
     echo "> $cfg already configured — skipping"

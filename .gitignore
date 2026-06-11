@@ -5,3 +5,6 @@ formr_app/formr
 mysql/data/*
 mysql/dbinitial/*
 !.gitkeep
+.playwright-mcp
+mysql/data.backup*
+

@@ -20,12 +20,16 @@ your host (with your IDE + Xdebug) and changes are live in the container.
 Then open **http://localhost** (admin login at `http://localhost/admin/account/login`,
 using `FORMR_EMAIL` / `FORMR_PASSWORD` from `.env`). OpenCPU is at `http://localhost:8080/ocpu/`.
 
-The first `build.sh` takes a few minutes: the container's entrypoint runs
-`composer install` and builds the frontend bundles with `npm` (formr v1.0.0+ no
-longer commits them).
+The first `build.sh` takes a few minutes: the OpenCPU image compiles the formr
+R package and its missing CRAN dependencies from source (the heavy ones ship
+with `opencpu/base`), and the app container's entrypoint runs `composer install`
+and builds the frontend bundles with `npm` (formr v1.0.0+ no longer commits
+them).
 
 ## Using the prebuilt public images (skip the local image build)
-The three environment images are published to GHCR. To pull instead of build:
+The three environment images are published to GHCR (amd64 only — on Apple
+Silicon skip this and build locally, which is the default). To pull instead of
+build:
 ```bash
 echo "FORMR_REGISTRY=ghcr.io/rubenarslan" >> .env   # already the default
 docker compose pull        # formr-dev-app / -daemon / -opencpu
